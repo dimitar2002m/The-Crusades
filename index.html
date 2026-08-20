@@ -91,8 +91,18 @@
         <script src="data/_10.js"></script>
         <script src="data/12171272_11.js"></script>
         <script>
+        // Ограничаваме картата до Европа + Средиземноморие + Северна Африка + Близък изток
+        // (театърът на кръстоносните походи)
+        var crusadesBounds = L.latLngBounds(
+            [20.0, -15.0],   // югозапад (Сахара / Атлантик)
+            [60.0,  55.0]    // североизток (Балтика / Каспий)
+        );
         var map = L.map('map', {
-            zoomControl:false, maxZoom:28, minZoom:1
+            zoomControl: false,
+            maxZoom: 28,
+            minZoom: 4,
+            maxBounds: crusadesBounds,
+            maxBoundsViscosity: 1.0
         }).fitBounds([[25.410737435121895,-5.818993019963447],[50.7385450429496,26.457151188241777]]);
         var hash = new L.Hash(map);
         map.attributionControl.setPrefix('<a href="https://github.com/qgis2web/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
@@ -740,7 +750,7 @@
             '<span class="legend-swatch legend-swatch-square" style="background:#f5f0e0"></span>Мюсюлмани': religiiLayers['Мюсюлмани'],
             '<span class="legend-swatch legend-swatch-square" style="background:#a8c98e"></span>Латински държави (кръстоносни владения)': religiiLayers['Латински държави'],
         };
-        L.control.layers(null, crusadeOverlays, { collapsed: false, position: 'topright' }).addTo(map);
+        L.control.layers(null, crusadeOverlays, { collapsed: true, position: 'topright' }).addTo(map);
         document.querySelectorAll('.leaflet-control-layers').forEach(function(el) {
             el.classList.add('crusade-legend');
         });
