@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/leaflet.photon.css">
+        <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+        }
+        @media (max-width: 600px) {
+            .leaflet-popup-content {
+                max-width: 78vw !important;
+            }
+            .crusade-popup .leaflet-popup-content-wrapper {
+                font-size: 13px;
+            }
+            .leaflet-control-layers {
+                max-height: 70vh;
+                overflow-y: auto;
+            }
+        }
+        .crusade-popup .leaflet-popup-content-wrapper {
+            border-radius: 6px;
+        }
+        .crusade-popup .leaflet-popup-content h3 {
+            margin: 0 0 4px;
+            font-size: 16px;
+            font-family: Georgia, serif;
+            color: #5a2d0c;
+        }
+        .crusade-popup .leaflet-popup-content .crusade-dates {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+            background: #8b4513;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+        .crusade-popup .leaflet-popup-content p {
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 0 0 8px;
+        }
+        .crusade-legend {
+            background: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.8;
+        }
+        .crusade-legend .legend-swatch {
+            display: inline-block;
+            width: 14px;
+            height: 3px;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .crusade-legend .legend-swatch-square {
+            height: 10px;
+            border: 1px solid rgba(50,50,50,0.4);
+        }
+        </style>
+        <title>Кръстоносните походи</title>
+    </head>
+    <body>
+        <div id="map">
+        </div>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/multi-style-layer.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet.photon.js"></script>
+        <script src="js/leaflet.polylineDecorator.js"></script>
+        <script src="data/ne_50m_geography_marine_polysshp_0.js"></script>
+        <script src="data/ne_50m_landshp_1.js"></script>
+        <script src="data/religii.js"></script>
+        <script src="data/_2.js"></script>
+        <script src="data/_3.js"></script>
+        <script src="data/moretane_50m_geography_marine_polysshp_4.js"></script>
+        <script src="data/_5.js"></script>
+        <script src="data/10961102_6.js"></script>
+        <script src="data/11471149_7.js"></script>
+        <script src="data/11891192_8.js"></script>
+        <script src="data/12021204_9.js"></script>
+        <script src="data/_10.js"></script>
+        <script src="data/12171272_11.js"></script>
+        <script>
+        // Ограничаваме картата до Европа + Средиземноморие + Северна Африка + Близък изток
+        // (театърът на кръстоносните походи)
+        var crusadesBounds = L.latLngBounds(
+            [20.0, -15.0],   // югозапад (Сахара / Атлантик)
+            [60.0,  55.0]    // североизток (Балтика / Каспий)
+        );
+        var map = L.map('map', {
+            zoomControl: false,
+            maxZoom: 28,
+            minZoom: 4,
+            maxBounds: crusadesBounds,
+            maxBoundsViscosity: 1.0
+        }).fitBounds([[25.410737435121895,-5.818993019963447],[50.7385450429496,26.457151188241777]]);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/qgis2web/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // modify popup if contains media
+        function addClassToPopupIfMedia(content, popup) {
+            var tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            var imgTd = tempDiv.querySelector('td img');
+            if (imgTd) {
+                var src = imgTd.getAttribute('src');
+                if (/\.(jpg|jpeg|png|gif|bmp|webp|avif)$/i.test(src)) {
+                    popup._contentNode.classList.add('media');
+                    var img = popup._contentNode.querySelector('td img');
+                    if (img) {
+                        // If already loaded (cache), update immediately
+                        if (img.complete && img.naturalHeight > 0) {
+                            popup.update();
+                        } else {
+                            img.addEventListener('load', function() {
+                                popup.update();
+                            });
+                            img.addEventListener('error', function() {
+                                popup.update();
+                            });
+                        }
+                    }
+                } else if (/\.(mp3|wav|ogg|aac)$/i.test(src)) {
+                    var audio = document.createElement('audio');
+                    audio.controls = true;
+                    audio.src = src;
+                    imgTd.parentNode.replaceChild(audio, imgTd);
+                    popup._contentNode.classList.add('media');
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else if (/\.(mp4|webm|ogg|mov)$/i.test(src)) {
+                    var video = document.createElement('video');
+                    video.controls = true;
+                    video.src = src;
+                    video.style.width = "400px";
+                    video.style.height = "300px";
+                    video.style.maxHeight = "60vh";
+                    video.style.maxWidth = "60vw";
+                    imgTd.parentNode.replaceChild(video, imgTd);
+                    popup._contentNode.classList.add('media');
+                    // Aggiorna il popup quando il video carica i metadati
+                    video.addEventListener('loadedmetadata', function() {
+                        popup.update();
+                    });
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else {
+                    popup._contentNode.classList.remove('media');
+                }
+            } else {
+                popup._contentNode.classList.remove('media');
+            }
+        }
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+        }
+        function pop_ne_50m_geography_marine_polysshp_0(feature, layer) {
+            // без popup
+        }
+
+        function style_ne_50m_geography_marine_polysshp_0_0() {
+            return {
+                pane: 'pane_ne_50m_geography_marine_polysshp_0',
+                opacity: 1,
+                color: 'rgba(189,224,254,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 0.5,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(189,224,254,1.0)',
+                interactive: false,
+            }
+        }
+        map.createPane('pane_ne_50m_geography_marine_polysshp_0');
+        map.getPane('pane_ne_50m_geography_marine_polysshp_0').style.zIndex = 399;
+        map.getPane('pane_ne_50m_geography_marine_polysshp_0').style['mix-blend-mode'] = 'normal';
+        var layer_ne_50m_geography_marine_polysshp_0 = new L.geoJson(json_ne_50m_geography_marine_polysshp_0, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_ne_50m_geography_marine_polysshp_0',
+            layerName: 'layer_ne_50m_geography_marine_polysshp_0',
+            pane: 'pane_ne_50m_geography_marine_polysshp_0',
+            onEachFeature: pop_ne_50m_geography_marine_polysshp_0,
+            style: style_ne_50m_geography_marine_polysshp_0_0,
+        });
+        bounds_group.addLayer(layer_ne_50m_geography_marine_polysshp_0);
+        // map.addLayer(layer_ne_50m_geography_marine_polysshp_0); // по избор от легендата
+        function pop_ne_50m_landshp_1(feature, layer) {
+            // без popup
+        }
+
+        function style_ne_50m_landshp_1_0() {
+            return {
+                pane: 'pane_ne_50m_landshp_1', opacity: 1,
+                color: 'rgba(90,80,70,0.4)', dashArray: '', lineCap: 'butt', lineJoin: 'miter', weight: 0.6,
+                fill: true, fillOpacity: 0.95, fillColor: 'rgba(176, 160, 138, 1.0)', interactive: false,
+            }
+        }
+        map.createPane('pane_ne_50m_landshp_1');
+        map.getPane('pane_ne_50m_landshp_1').style.zIndex = 401;
+        map.getPane('pane_ne_50m_landshp_1').style['mix-blend-mode'] = 'normal';
+        var layer_ne_50m_landshp_1 = new L.geoJson(json_ne_50m_landshp_1, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_ne_50m_landshp_1',
+            layerName: 'layer_ne_50m_landshp_1',
+            pane: 'pane_ne_50m_landshp_1',
+            onEachFeature: pop_ne_50m_landshp_1,
+            style: style_ne_50m_landshp_1_0,
+        });
+        bounds_group.addLayer(layer_ne_50m_landshp_1);
+        map.addLayer(layer_ne_50m_landshp_1);
+
+        function style_religii(feature) {
+            var c = (feature.properties && feature.properties.color) || "#ccc";
+            return { pane: "pane_religii", opacity: 1, color: "rgba(50,50,50,0.3)", weight: 0.8,
+                     fill: true, fillOpacity: 0.75, fillColor: c, interactive: false };
+        }
+        map.createPane("pane_religii");
+        map.getPane("pane_religii").style.zIndex = 420;
+
+        // Отделни слоеве по религия (вместо един общ), за да могат да се
+        // показват/скриват поотделно и да влязат в легендата с име и цвят.
+        var religiiByName = {};
+        json_religii.features.forEach(function(f) {
+            var name = f.properties.name;
+            (religiiByName[name] = religiiByName[name] || []).push(f);
+        });
+        var religiiLayers = {};
+        Object.keys(religiiByName).forEach(function(name) {
+            var fc = { type: "FeatureCollection", features: religiiByName[name] };
+            var lyr = new L.geoJson(fc, { pane: "pane_religii", interactive: false, style: style_religii });
+            religiiLayers[name] = lyr;
+            bounds_group.addLayer(lyr);
+            map.addLayer(lyr);
+        });
+
+        function pop__2(feature, layer) {
+            // без popup
+        }
+
+        function style__2_0() {
+            return {
+                pane: 'pane__2',
+                radius: 5.0,
+                opacity: 1,
+                color: 'rgba(20, 20, 20, 1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 2.0,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(255, 255, 255, 1.0)',
+                interactive: false,
+            }
+        }
+        map.createPane('pane__2');
+        map.getPane('pane__2').style.zIndex = 480;
+        map.getPane('pane__2').style['mix-blend-mode'] = 'normal';
+        var layer__2 = new L.geoJson(json__2, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json__2',
+            layerName: 'layer__2',
+            pane: 'pane__2',
+            onEachFeature: pop__2,
+            pointToLayer: function (feature, latlng) {
+                var context = {
+                    feature: feature,
+                    variables: {}
+                };
+                return L.circleMarker(latlng, style__2_0(feature));
+            },
+        });
+        bounds_group.addLayer(layer__2);
+        map.addLayer(layer__2);
+        function pop__3(feature, layer) {
+            // без popup
+        }
+
+        function style__3_0() {
+            return {
+                pane: 'pane__3',
+                opacity: 1,
+                color: 'rgba(35,35,35,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 1.0, 
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(196,60,57,1.0)',
+                interactive: true,
+            }
+        }
+        map.createPane('pane__3');
+        map.getPane('pane__3').style.zIndex = 403;
+        map.getPane('pane__3').style['mix-blend-mode'] = 'normal';
+        var layer__3 = new L.geoJson(json__3, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json__3',
+            layerName: 'layer__3',
+            pane: 'pane__3',
+            onEachFeature: pop__3,
+            style: style__3_0,
+        });
+        bounds_group.addLayer(layer__3);
+        map.addLayer(layer__3);
+        function pop_moretane_50m_geography_marine_polysshp_4(feature, layer) {
+            // без popup
+        }
+
+        function style_moretane_50m_geography_marine_polysshp_4_0() {
+            return {
+                pane: 'pane_moretane_50m_geography_marine_polysshp_4',
+                opacity: 1,
+                color: 'rgba(189,224,254,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 0.5,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(189,224,254,1.0)',
+                interactive: false,
+            }
+        }
+        map.createPane('pane_moretane_50m_geography_marine_polysshp_4');
+        map.getPane('pane_moretane_50m_geography_marine_polysshp_4').style.zIndex = 400;
+        map.getPane('pane_moretane_50m_geography_marine_polysshp_4').style['mix-blend-mode'] = 'normal';
+        var layer_moretane_50m_geography_marine_polysshp_4 = new L.geoJson(json_moretane_50m_geography_marine_polysshp_4, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_moretane_50m_geography_marine_polysshp_4',
+            layerName: 'layer_moretane_50m_geography_marine_polysshp_4',
+            pane: 'pane_moretane_50m_geography_marine_polysshp_4',
+            onEachFeature: pop_moretane_50m_geography_marine_polysshp_4,
+            style: style_moretane_50m_geography_marine_polysshp_4_0,
+        });
+        bounds_group.addLayer(layer_moretane_50m_geography_marine_polysshp_4);
+        // map.addLayer(layer_moretane_50m_geography_marine_polysshp_4); // по избор от легендата
+        function pop__5(feature, layer) {
+            // без popup
+        }
+
+        function style__5_0() {
+            return {
+                pane: 'pane__5',
+                radius: 9.0,
+                opacity: 1,
+                color: 'rgba(15, 15, 15, 1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 2.5,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(255, 255, 255, 1.0)',
+                interactive: false,
+            }
+        }
+        function style__5_1() {
+            return {
+                pane: 'pane__5',
+                radius: 4.0,
+                opacity: 1,
+                color: 'rgba(15, 15, 15, 1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 1.5,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(30, 30, 30, 1.0)',
+                interactive: false,
+            }
+        }
+        map.createPane('pane__5');
+        map.getPane('pane__5').style.zIndex = 481;
+        map.getPane('pane__5').style['mix-blend-mode'] = 'normal';
+        var layer__5 = new L.geoJson.multiStyle(json__5, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json__5',
+            layerName: 'layer__5',
+            pane: 'pane__5',
+            onEachFeature: pop__5,
+            pointToLayers: [function (feature, latlng) {
+                var context = {
+                    feature: feature,
+                    variables: {}
+                };
+                return L.circleMarker(latlng, style__5_0(feature));
+            },function (feature, latlng) {
+                var context = {
+                    feature: feature,
+                    variables: {}
+                };
+                return L.circleMarker(latlng, style__5_1(feature));
+            },
+        ]});
+        bounds_group.addLayer(layer__5);
+        map.addLayer(layer__5);
+        function pop_10961102_6(feature, layer) {
+            var popupContent = `<h3>Първи кръстоносен поход</h3><span class="crusade-dates">1096 – 1099 г.</span><p><strong>Повод:</strong> Папа Урban II призовава за поход на Клермонския събор през 1095 г., след молба за помощ от византийския император Алексий I срещу настъпващите селджукски турци.</p>
+            <p><strong>Водачи:</strong> Готфрид Бульонски, Реймон IV Тулузки, Боемунд Тарантски.</p>
+            <p><strong>Ключови събития:</strong> превземане на Никея (1097), продължителна обсада на Антиохия (1098), превземане на Йерусалим (юли 1099).</p>
+            <p><strong>Резултат:</strong> единственият кръстоносен поход, завършил с реален успех — създадени са Йерусалимско кралство, графство Едеса, княжество Антиохия и графство Триполи.</p>`;
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(popupContent, e.popup);
+            });
+            layer.bindPopup(popupContent, { maxHeight: 420, maxWidth: 300, className: 'crusade-popup' });
+        }
+
+        function style_10961102_6_0() {
+            return {
+                pane: 'pane_10961102_6',
+                opacity: 1,
+                color: 'rgba(93,128,50,1.0)',
+                dashArray: '',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 4.5,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_10961102_6');
+        map.getPane('pane_10961102_6').style.zIndex = 460;
+        map.getPane('pane_10961102_6').style['mix-blend-mode'] = 'normal';
+        var layer_10961102_6 = new L.geoJson(json_10961102_6, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_10961102_6',
+            layerName: 'layer_10961102_6',
+            pane: 'pane_10961102_6',
+            onEachFeature: pop_10961102_6,
+            style: style_10961102_6_0,
+        });
+        bounds_group.addLayer(layer_10961102_6);
+        map.addLayer(layer_10961102_6);
+        function pop_11471149_7(feature, layer) {
+            var popupContent = `<h3>Втори кръстоносен поход</h3><span class="crusade-dates">1147 – 1149 г.</span><p><strong>Повод:</strong> падането на графство Едеса под мюсюлманска власт през 1144 г. Походът е проповядван от Бернар от Клерво.</p>
+            <p><strong>Водачи:</strong> крал Луи VII на Франция и император Конрад III на Свещената Римска империя.</p>
+            <p><strong>Ключови събития:</strong> неуспешна обсада на Дамаск през 1148 г.</p>
+            <p><strong>Резултат:</strong> пълен провал — отслабва престижа на кръстоносните държави и подготвя почвата за обединението на мюсюлманските сили под Нур ад-Дин и по-късно Саладин.</p>`;
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(popupContent, e.popup);
+            });
+            layer.bindPopup(popupContent, { maxHeight: 420, maxWidth: 300, className: 'crusade-popup' });
+        }
+
+        function style_11471149_7_0() {
+            return {
+                pane: 'pane_11471149_7',
+                opacity: 1,
+                color: 'rgba(230,28,57,1.0)',
+                dashArray: '',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 4.5,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_11471149_7');
+        map.getPane('pane_11471149_7').style.zIndex = 461;
+        map.getPane('pane_11471149_7').style['mix-blend-mode'] = 'normal';
+        var layer_11471149_7 = new L.geoJson(json_11471149_7, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_11471149_7',
+            layerName: 'layer_11471149_7',
+            pane: 'pane_11471149_7',
+            onEachFeature: pop_11471149_7,
+            style: style_11471149_7_0,
+        });
+        bounds_group.addLayer(layer_11471149_7);
+        map.addLayer(layer_11471149_7);
+        function pop_11891192_8(feature, layer) {
+            var popupContent = `<h3>Трети кръстоносен поход</h3><span class="crusade-dates">1189 – 1192 г.</span><p><strong>Повод:</strong> превземането на Йерусалим от Саладин през 1187 г.</p>
+            <p><strong>Водачи:</strong> трима крале — Ричард I Лъвското сърце (Англия), Филип II Август (Франция) и Фридрих I Барбароса (Свещена Римска империя, удавя се по пътя).</p>
+            <p><strong>Ключови събития:</strong> превземане на Акра (1191), победа на Ричард над Саладин при Арсуф.</p>
+            <p><strong>Резултат:</strong> Йерусалим остава под мюсюлманска власт, но е постигнато споразумение, осигуряващо достъп на християнски поклонници до града.</p>`;
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(popupContent, e.popup);
+            });
+            layer.bindPopup(popupContent, { maxHeight: 420, maxWidth: 300, className: 'crusade-popup' });
+        }
+
+        function style_11891192_8_0() {
+            return {
+                pane: 'pane_11891192_8',
+                opacity: 1,
+                color: 'rgba(221,144,35,1.0)',
+                dashArray: '8, 10',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 4.5,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_11891192_8');
+        map.getPane('pane_11891192_8').style.zIndex = 462;
+        map.getPane('pane_11891192_8').style['mix-blend-mode'] = 'normal';
+        var layer_11891192_8 = new L.geoJson(json_11891192_8, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_11891192_8',
+            layerName: 'layer_11891192_8',
+            pane: 'pane_11891192_8',
+            onEachFeature: pop_11891192_8,
+            style: style_11891192_8_0,
+        });
+        bounds_group.addLayer(layer_11891192_8);
+        map.addLayer(layer_11891192_8);
+        function pop_12021204_9(feature, layer) {
+            var popupContent = `<h3>Четвърти кръстоносен поход</h3><span class="crusade-dates">1202 – 1204 г.</span><p><strong>Повод:</strong> първоначално планиран за освобождаване на Йерусалим през Египет.</p>
+            <p><strong>Ключови събития:</strong> заради венециански финансов натиск и византийски политически интриги, походът се отклонява и вместо това превзема и опустошава Константинопол през 1204 г. — християнски град.</p>
+            <p><strong>Резултат:</strong> създаване на Латинска империя на мястото на Византия; трайно и дълбоко уврежда отношенията между католическото и православното християнство. Смятан е за един от най-противоречивите кръстоносни походи.</p>`;
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(popupContent, e.popup);
+            });
+            layer.bindPopup(popupContent, { maxHeight: 420, maxWidth: 300, className: 'crusade-popup' });
+        }
+
+        function style_12021204_9_0() {
+            return {
+                pane: 'pane_12021204_9',
+                opacity: 1,
+                color: 'rgba(28,107,97,1.0)',
+                dashArray: '8, 10',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 4.5,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_12021204_9');
+        map.getPane('pane_12021204_9').style.zIndex = 463;
+        map.getPane('pane_12021204_9').style['mix-blend-mode'] = 'normal';
+        var layer_12021204_9 = new L.geoJson(json_12021204_9, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_12021204_9',
+            layerName: 'layer_12021204_9',
+            pane: 'pane_12021204_9',
+            onEachFeature: pop_12021204_9,
+            style: style_12021204_9_0,
+        });
+        bounds_group.addLayer(layer_12021204_9);
+        map.addLayer(layer_12021204_9);
+        function pop__10(feature, layer) {
+            // без popup
+        }
+
+        function style__10_0() {
+            return {
+                pane: 'pane__10',
+                opacity: 1,
+                color: 'rgba(30, 110, 200, 1.0)',
+                dashArray: '',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 2.4,
+                fillOpacity: 0,
+                interactive: false,
+            }
+        }
+        map.createPane('pane__10');
+        map.getPane('pane__10').style.zIndex = 455;
+        map.getPane('pane__10').style['mix-blend-mode'] = 'normal';
+        var layer__10 = new L.geoJson(json__10, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json__10',
+            layerName: 'layer__10',
+            pane: 'pane__10',
+            onEachFeature: pop__10,
+            style: style__10_0,
+        });
+        bounds_group.addLayer(layer__10);
+        map.addLayer(layer__10);
+        function pop_12171272_11(feature, layer) {
+            var popupContent = `<h3>По-късни кръстоносни походи</h3><span class="crusade-dates">1217 – 1272 г. (Пети – Девети)</span><p>Обединява поредица от по-късни експедиции към Светите земи:</p>
+            <p><strong>Пети (1217–1221):</strong> насочен към Египет, превзема Дамиета, но завършва с неуспех.</p>
+            <p><strong>Шести (1228–1229):</strong> воден от отлъчения император Фридрих II, връща Йерусалим по дипломатически, а не по военен път — за кратко.</p>
+            <p><strong>Седми (1248–1254):</strong> воден от Луи IX Френски; Дамиета е превзета и загубена, самият крал е пленен и откупен.</p>
+            <p><strong>Осми (1270) и Девети (1271–1272):</strong> последни мащабни походи към Светите земи. Луи IX умира от болест в Тунис; Акра, последната кръстоносна крепост, пада през 1291 г.</p>`;
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(popupContent, e.popup);
+            });
+            layer.bindPopup(popupContent, { maxHeight: 420, maxWidth: 300, className: 'crusade-popup' });
+        }
+
+        function style_12171272_11_0() {
+            return {
+                pane: 'pane_12171272_11',
+                opacity: 1,
+                color: 'rgba(142,25,195,1.0)',
+                dashArray: '',
+                lineCap: 'round',
+                lineJoin: 'round',
+                weight: 4.5,
+                fillOpacity: 0,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_12171272_11');
+        map.getPane('pane_12171272_11').style.zIndex = 464;
+        map.getPane('pane_12171272_11').style['mix-blend-mode'] = 'normal';
+        var layer_12171272_11 = new L.geoJson(json_12171272_11, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_12171272_11',
+            layerName: 'layer_12171272_11',
+            pane: 'pane_12171272_11',
+            onEachFeature: pop_12171272_11,
+            style: style_12171272_11_0,
+        });
+        bounds_group.addLayer(layer_12171272_11);
+        map.addLayer(layer_12171272_11);
+        
+        try {
+            if (typeof layer__10 !== "undefined") layer__10.bringToFront();
+            if (typeof layer_10961102_6 !== "undefined") layer_10961102_6.bringToFront();
+            if (typeof layer_11471149_7 !== "undefined") layer_11471149_7.bringToFront();
+            if (typeof layer_11891192_8 !== "undefined") layer_11891192_8.bringToFront();
+            if (typeof layer_12021204_9 !== "undefined") layer_12021204_9.bringToFront();
+            if (typeof layer_12171272_11 !== "undefined") layer_12171272_11.bringToFront();
+            if (typeof layer__2 !== "undefined") layer__2.bringToFront();
+            if (typeof layer__5 !== "undefined") layer__5.bringToFront();
+        } catch (e) {}
+
+        setBounds();
+        var i = 0;
+        layer__2.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['място'] !== null?String('<div style="color: #323232; font-size: 10pt; font-weight: bold; font-style: italic; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['място']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css__2'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        var i = 0;
+        layer_moretane_50m_geography_marine_polysshp_4.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['name_bg'] !== null?String('<div style="color: #1390f9; font-size: 15pt; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['name_bg']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css_moretane_50m_geography_marine_polysshp_4'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        var i = 0;
+        layer__5.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['Столи'] !== null?String('<div style="color: #323232; font-size: 10pt; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['Столи']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css__5'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        var i = 0;
+        layer__10.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['name_bg'] !== null?String('<div style="color: #4a90e2; font-size: 10pt; font-family: \'Open Sans\', sans-serif;">' + layer.feature.properties['name_bg']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css__10'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        resetLabels([layer__2,layer_moretane_50m_geography_marine_polysshp_4,layer__5,layer__10]);
+        map.on("zoomend", function(){
+            resetLabels([layer__2,layer_moretane_50m_geography_marine_polysshp_4,layer__5,layer__10]);
+        });
+        map.on("layeradd", function(){
+            resetLabels([layer__2,layer_moretane_50m_geography_marine_polysshp_4,layer__5,layer__10]);
+        });
+        map.on("layerremove", function(){
+            resetLabels([layer__2,layer_moretane_50m_geography_marine_polysshp_4,layer__5,layer__10]);
+        });
+
+        // ── Легенда + превключвател на походите ──
+        // Оригиналният файл сочеше към L.Control.Layers.Tree, но самите
+        // библиотечни файлове липсваха от пакета (счупени заявки при всяко
+        // зареждане). Заменени с вграден Leaflet контрол, който едновременно
+        // служи като легенда (цвят + име) и позволява поход по поход да се
+        // скрива/показва.
+        var crusadeOverlays = {
+            '<span class="legend-swatch" style="background:rgba(93,128,50,1.0)"></span>Първи поход (1096–1099)': layer_10961102_6,
+            '<span class="legend-swatch" style="background:rgba(230,28,57,1.0)"></span>Втори поход (1147–1149)': layer_11471149_7,
+            '<span class="legend-swatch" style="background:rgba(221,144,35,1.0)"></span>Трети поход (1189–1192)': layer_11891192_8,
+            '<span class="legend-swatch" style="background:rgba(28,107,97,1.0)"></span>Четвърти поход (1202–1204)': layer_12021204_9,
+            '<span class="legend-swatch" style="background:rgba(142,25,195,1.0)"></span>По-късни походи (1217–1272)': layer_12171272_11,
+            '<span class="legend-swatch legend-swatch-square" style="background:#f0c4b4"></span>Католици': religiiLayers['Католици'],
+            '<span class="legend-swatch legend-swatch-square" style="background:#8a9678"></span>Православни': religiiLayers['Православни'],
+            '<span class="legend-swatch legend-swatch-square" style="background:#f5f0e0"></span>Мюсюлмани': religiiLayers['Мюсюлмани'],
+            '<span class="legend-swatch legend-swatch-square" style="background:#a8c98e"></span>Латински държави (кръстоносни владения)': religiiLayers['Латински държави'],
+            '<span class="legend-swatch legend-swatch-square" style="background:rgba(189,224,254,1.0);border:1px solid #7eb8da"></span>Морета и океани': layer_moretane_50m_geography_marine_polysshp_4,
+        };
+        L.control.layers(null, crusadeOverlays, { collapsed: true, position: 'topright' }).addTo(map);
+        document.querySelectorAll('.leaflet-control-layers').forEach(function(el) {
+            el.classList.add('crusade-legend');
+        });
+
+        // ── Стрелки по посока на движение ──
+        // Показват накъде се е движил всеки поход по маршрута му — един слой
+        // декоратор на цвят, синхронизиран с показването/скриването на
+        // съответния поход чрез layer control-а по-горе.
+        var crusadeArrowLayers = [
+            { layer: layer_10961102_6, color: 'rgba(93,128,50,1.0)' },
+            { layer: layer_11471149_7, color: 'rgba(230,28,57,1.0)' },
+            { layer: layer_11891192_8, color: 'rgba(221,144,35,1.0)' },
+            { layer: layer_12021204_9, color: 'rgba(28,107,97,1.0)' },
+            { layer: layer_12171272_11, color: 'rgba(142,25,195,1.0)' },
+        ];
+        crusadeArrowLayers.forEach(function(entry) {
+            var decorator = L.polylineDecorator(entry.layer.getLayers(), {
+                patterns: [{
+                    offset: '5%',
+                    repeat: '12%',
+                    symbol: L.Symbol.arrowHead({
+                        pixelSize: 14,
+                        polygon: false,
+                        pathOptions: { stroke: true, color: entry.color, weight: 3 }
+                    })
+                }]
+            });
+            entry.layer.on('add', function() { decorator.addTo(map); });
+            entry.layer.on('remove', function() { map.removeLayer(decorator); });
+            decorator.addTo(map); // походите са видими по подразбиране
+        });
+        </script>
+    </body>
+</html>
